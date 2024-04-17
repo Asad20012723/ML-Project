@@ -1,0 +1,785 @@
+---
+title: "final_rf_knn"
+author: "Asad"
+date: "4/13/2024"
+output: html_document
+---
+
+```{r}
+
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(rpart)
+library(class)
+library(dplyr)
+library(caret)
+library(ggplot2)
+library(corrplot)
+library(tibble)
+library(nnet)
+library(mlbench)
+# install.packages("expss")
+library(randomForest)
+library(nnet)
+library(stargazer)
+# library(DMwR)
+library(party)
+library(e1071)
+library(kernlab)
+library(scales)
+library(class)
+library(psych)
+library(knitr)
+library(expss)
+library(reshape2)
+library(pROC)
+library(MASS)
+
+
+
+```
+
+
+```{r}
+
+# Load the data
+data <- read.csv("D:\\TML\\Final ML Project\\imports-85.csv", na.strings = "?")
+
+# View the first few rows
+head(data)
+
+
+```
+
+```{r}
+
+# Remove columns that are entirely NA or not useful
+data <- data[,colSums(is.na(data)) < nrow(data)]
+head(data)
+data <- subset(data, select = -c(X.5))
+data <- subset(data, select = -c(normalized.losses))
+data <- subset(data, select = -c(make))
+
+# data <- subset(data, select = -c(make))
+head(data)
+
+
+
+```
+
+**Data Pre-processing**
+```{r}
+
+factorCols = c('symboling',
+               'fuel.type','aspiration','num.of.doors',
+               'body.style','drive.wheels','engine.location',
+               'engine.type','num.of.cylinders',
+               'fuel.system')
+
+intCols =c('horsepower','peak.rpm','city.mpg','highway.mpg',
+           'price','curb.weight','engine.size')
+
+numCols = c('bore','stroke','compression.ratio','wheel.base','length','width','height')
+
+numeric_columns=c('horsepower','peak.rpm','city.mpg','highway.mpg',
+           'price','curb.weight','engine.size','bore','stroke','compression.ratio','wheel.base','length','width','height' )
+# Convert factor columns to factors
+for (col in factorCols) {
+  data[[col]] <- factor(data[[col]])
+}
+
+# Convert integer columns to integers
+for (col in intCols) {
+  if (all(is.na(as.integer(data[[col]])))) {
+    warning(paste("Conversion issue detected in column:", col))
+  } else {
+    data[[col]] <- as.integer(data[[col]])
+  }
+}
+
+
+# Convert numeric columns to numeric
+for (col in numCols) {
+  if (any(!is.na(as.numeric(data[[col]])))) {
+    data[[col]] <- as.numeric(data[[col]])
+  } else {
+    warning(paste("Conversion issue detected in column:", col))
+  }
+}
+
+head(data)
+nrow(data)
+
+
+```
+
+
+
+
+```{r}
+
+# Apply na.omit() to remove rows with missing values
+data <- na.omit(data)
+
+# Calculate the number of missing values in each column
+NAsByFeature <- apply(data, 2, function(x) {
+  sum(is.na(x))
+})
+
+# Display the number of missing values in each column
+print(NAsByFeature)
+
+nrow(data)
+
+
+
+```
+
+
+```{r}
+
+library(ggplot2)
+
+# Calculate the correlation matrix
+cor_data <- cor(data[sapply(data, is.numeric)], use="complete.obs")
+
+# Create a data frame from the correlation matrix for plotting
+cor_df <- as.data.frame(as.table(cor_data))
+
+# Plotting the correlation matrix
+ggplot(data = cor_df, aes(x = Var1, y = Var2, fill = Freq)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, limit = c(-1, 1), space = "Lab", name="Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 10, hjust = 1),
+        axis.text.y = element_text(size = 10)) +
+  labs(x = '', y = '', title = 'Correlation Matrix') +
+  coord_fixed()
+
+
+
+
+
+
+```
+
+
+<!-- Principal Component Analysis (PCA) is fundamentally a technique used for continuous numerical data because it involves a covariance matrix. Categorical data does not have a meaningful covariance structure, which means you cannot apply PCA directly to categorical data. -->
+
+
+**PCA variable selection**
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(caret)
+# install.packages("FactoMineR")
+# library(FactoMineR)
+
+# Assuming 'data' is your dataframe.
+# It's a good practice to make a copy of the dataset for such transformations.
+data_processed <- data
+
+# Convert factor columns to factors
+for (col in factorCols) {
+  data_processed[[col]] <- factor(data[[col]])
+}
+
+# One-hot encode the categorical variables
+dummies <- dummyVars("~ .", data = data_processed)
+data_processed <- predict(dummies, newdata = data_processed) %>% 
+  as.data.frame()
+
+# The dummyVars function may change the names of the factor columns by creating dummy variables.
+# After one-hot encoding, we'll update 'intCols' to contain only those columns that still exist.
+intCols <- setdiff(intCols, factorCols) # Remove factor columns from 'intCols'
+actual_numeric_cols <- names(data_processed)[names(data_processed) %in% intCols]
+
+# Standardize the numerical variables
+data_processed[actual_numeric_cols] <- scale(data_processed[actual_numeric_cols])
+
+# Before performing PCA, we need to remove factor columns since they are now one-hot encoded
+# And we combine them with the original numeric columns to have the complete list for PCA
+numeric_columns <- c(actual_numeric_cols, grep("^", names(data_processed), value = TRUE))
+
+# Perform PCA using the 'prcomp' function as an alternative, considering only numeric columns
+pca_result <- prcomp(data_processed[numeric_columns], scale. = FALSE, center = TRUE)
+
+# Summary of PCA to see explained variance
+summary(pca_result)
+
+
+
+```
+
+
+
+
+
+
+
+```{r}
+
+
+# Install ggplot2 if it's not already installed
+# if (!require(ggplot2)) install.packages("ggplot2", dependencies = TRUE)
+library(ggplot2)
+
+# Create a boxplot for the 'symboling' variable
+ggplot(data, aes(x = data$symboling, y =  data$price)) +
+  geom_boxplot() +
+  labs(title = "Box plot of Symboling", y = "Price", x = "Symboling") +
+  theme_minimal()
+
+
+library(ggplot2)
+
+# Assuming your data frame is named 'df' and 'symboling' is the target variable.
+ggplot(data, aes(x = as.factor(symboling))) + 
+  geom_bar() + 
+  xlab("Symboling Class") + 
+  ylab("Count") +
+  ggtitle("Distribution of Symboling Classes")
+
+
+
+
+glimpse(data)
+
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+**Data for random forest. We will use complete data.**
+```{r}
+library(glmnet)
+library(caret)
+
+# Ensure all factor variables in testData have the same levels as in trainData
+for(col in names(trainData)) {
+    if(is.factor(trainData[[col]])) {
+        testData[[col]] <- factor(testData[[col]], levels = levels(trainData[[col]]))
+    }
+}
+
+
+# Assuming 'new_data' is already loaded and preprocessed
+set.seed(123)
+
+# Split data into training and testing sets
+index <- createDataPartition(data$symboling, p = 0.8, list = TRUE)
+trainData <- data[index$Resample1,]
+testData <- data[-index$Resample1,]
+
+
+library(dplyr)
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+**1) RF model for prediction**
+```{r}
+
+head(data)
+
+control <- trainControl(method = "cv", number = 10, savePredictions = "final")
+rf_model <- train(symboling ~ ., data = trainData, method = "rf", num.trees = 100)
+print(rf_model)
+# Summarize the model
+accuracy_cv <- rf_model$results$Accuracy
+print(paste("Cross-validated Accuracy from training: ", accuracy_cv))
+
+rf_predictions <- predict(rf_model, testData,type = "prob")
+
+# Assuming 'rf_predictions' is your data frame or matrix of probabilities
+# This will find the column index with the highest probability in each row
+highest_prob_index <- max.col(rf_predictions, ties.method = "first")
+
+# Get the labels corresponding to the highest probability
+# Column names of 'rf_predictions' should match your class labels
+predicted_labels <- colnames(rf_predictions)[highest_prob_index]
+
+# Create a new data frame showing the prediction with the row names from 'rf_predictions'
+final_predictions$label <- factor(final_predictions$label, levels = unique(testData$symboling))
+library(caret)
+
+# Check if testData$symboling is a factor and adjust if necessary
+testData$symboling <- factor(testData$symboling, levels = levels(final_predictions$label))
+
+# Calculate the confusion matrix
+rf_accuracy <- confusionMatrix(final_predictions$label, testData$symboling)
+
+# Print the accuracy results
+print(rf_accuracy)
+library(caret)
+
+# Assuming rf_accuracy is already calculated using confusionMatrix
+accuracy <- rf_accuracy$overall['Accuracy']
+precision <- rf_accuracy$byClass['Precision']
+recall <- rf_accuracy$byClass['Recall']
+
+print(paste("Accuracy: ", accuracy))
+print(paste("Precision: ", precision))
+print(paste("Recall: ", recall))
+
+
+
+# 0.88
+
+
+
+
+
+
+```
+
+**The full model with all the predictors is giving the accuracy of 88.89%**
+
+
+**Variable selction using RF.**
+```{r}
+
+# Check if the model has variable importance available
+if (!is.null(rf_model$finalModel$importance)) {
+    importance <- varImp(rf_model, scale = TRUE)  # Get importance; scale = TRUE standardizes the importance values
+    print(importance)
+    
+    # Plotting variable importance
+    plot(importance, main = "Variable Importance in Random Forest Model")
+} else 
+  
+{
+    cat("Variable importance scores are not available for this model.\n")
+}
+
+
+
+
+```
+
+Get the important variables from the RF model and use it in the models knn and neurel network. 
+
+### k-Nearest Neighbors
+
+**RF variables selection**
+```{r}
+
+
+# Assuming 'data' is your existing dataset
+# First, check that all required variables exist or adjust them
+names(data)
+
+
+# Variables to be included in the new dataset
+selected_vars <- c("symboling","wheel.base", "height", "curb.weight", 
+                   "length", "price", "width", "Bore", "horsepower", 
+                   "compression.ratio","engine.size")
+
+# Create a new dataset with only these variables
+new_data <- data[, selected_vars]
+
+
+head(new_data)
+
+
+
+
+```
+
+
+**RF data split**
+```{r}
+library(caret)
+
+# Assuming 'new_data' is already loaded and preprocessed
+set.seed(123)
+
+# Split data into training and testing sets
+index <- createDataPartition(new_data$symboling, p = 0.8, list = TRUE)
+trainData <- new_data[index$Resample1,]
+testData <- new_data[-index$Resample1,]
+
+
+```
+
+
+
+**2) multinom on RF variables**
+```{r}
+# Load necessary library
+library(nnet)
+
+# Assuming 'symboling' is your categorical response and the rest are predictors
+# You may need to adjust the formula depending on your specific predictors
+model <- multinom(symboling ~ ., data = trainData)
+
+# Summarize the model
+# summary(model)
+
+# Predict on test data
+predictions <- predict(model, newdata = testData)
+
+# Evaluate the model (optional, using confusion matrix for example)
+library(caret)
+confusionMatrix(data = predictions, reference = testData$symboling)
+#0.5
+
+
+```
+
+
+
+
+
+
+**3) knn model on RF variables**
+```{r}
+
+
+
+
+# Ensure all factor variables in testData have the same levels as in trainData
+for(col in names(trainData)) {
+    if(is.factor(trainData[[col]])) {
+        testData[[col]] <- factor(testData[[col]], levels = levels(trainData[[col]]))
+    }
+}
+
+# Training control settings
+control <- trainControl(method = "cv", number = 10, savePredictions = "final")
+
+# Train the kNN model
+knn_model <- train(symboling ~ ., data = trainData, method = "knn", trControl = control, tuneLength = 10, preProcess = "scale")
+
+# Summarize the kNN model
+print(knn_model)
+
+# Predict on test data
+knn_predictions <- predict(knn_model, testData)
+
+# Calculate accuracy using confusion matrix
+knn_accuracy <- confusionMatrix(knn_predictions, testData$symboling)
+print(knn_accuracy)
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+**4)Neurel net on RF variables in Python**
+
+
+
+
+
+**Making a dataset from lasso variables (lasso is done in python)**
+```{r}
+
+# data = 
+
+# Define the vector of selected features as determined by your analysis
+final_selected_features <- c(
+    "drive.wheels", "Bore", "num.of.doors", "wheel.base", "Stroke", "compression.ratio", "peak.rpm", "price",
+    "aspiration", "width", "curb.weight", "num.of.cylinders", "engine.size", "fuel.system",
+    "body.style", "height", "highway.mpg", "engine.location", "city_mpg"
+)
+
+# Create a new data frame with only the selected features
+new_data_2 <- data[, final_selected_features]
+# View(data)
+# Check the first few rows of the new data frame to confirm it's correctly created
+print(head(new_data_2))
+
+# Optionally, you can also include the target variable 'symboling' if you plan to use this data frame for further modeling
+new_data_lasso <- data[, c(final_selected_features, "symboling")]  # Add 'symboling' back if needed for modeling
+
+print(head(new_data_lasso))
+
+# head(data)
+
+
+
+```
+
+
+```{r}
+
+library(caret)
+
+# Assuming 'new_data' is already loaded and preprocessed
+set.seed(123)
+
+# Split data into training and testing sets
+index <- createDataPartition(new_data_lasso$symboling, p = 0.8, list = TRUE)
+trainData <- new_data_lasso[index$Resample1,]
+testData <- new_data_lasso[-index$Resample1,]
+
+
+
+
+```
+
+
+
+
+**5)multinom model on lasso variables**
+```{r}
+
+# Load necessary library
+library(nnet)
+
+# Assuming 'symboling' is your categorical response and the rest are predictors
+# You may need to adjust the formula depending on your specific predictors
+model <- multinom(symboling ~ ., data = trainData)
+
+# Summarize the model
+# summary(model)
+
+# Predict on test data
+predictions <- predict(model, newdata = testData)
+
+# Evaluate the model (optional, using confusion matrix for example)
+library(caret)
+confusionMatrix(data = predictions, reference = testData$symboling)
+#0.5
+
+
+
+```
+**Accuracy : 0.4722**
+
+<!-- **6) RF model for LASSO** -->
+<!-- ```{r} -->
+<!-- library(caret) -->
+
+<!-- # Viewing the first few rows of the dataset -->
+<!-- head(data) -->
+
+<!-- # Set up cross-validation control -->
+<!-- control <- trainControl(method = "cv", number = 10, savePredictions = "final") -->
+
+<!-- # Train the Random Forest model -->
+<!-- rf_model <- train(symboling ~ ., data = trainData, method = "rf", trControl = control, tuneLength = 3) -->
+<!-- print(rf_model) -->
+
+<!-- # Summarize the model -->
+<!-- accuracy_cv <- max(rf_model$results$Accuracy) -->
+<!-- print(paste("Cross-validated Accuracy from training: ", accuracy_cv)) -->
+
+<!-- # Make predictions on the test set -->
+<!-- rf_predictions <- predict(rf_model, testData, type = "prob") -->
+
+<!-- # Assuming 'rf_predictions' is your data frame or matrix of probabilities -->
+<!-- # Find the column index with the highest probability in each row -->
+<!-- highest_prob_index <- max.col(rf_predictions, ties.method = "first") -->
+
+<!-- # Get the labels corresponding to the highest probability -->
+<!-- # Column names of 'rf_predictions' should match your class labels -->
+<!-- predicted_labels <- colnames(rf_predictions)[highest_prob_index] -->
+
+<!-- # Create a new data frame for the predictions -->
+<!-- final_predictions <- data.frame(label = predicted_labels, row.names = NULL) -->
+<!-- final_predictions$label <- factor(final_predictions$label, levels = unique(testData$symboling)) -->
+
+<!-- # Check if testData$symboling is a factor and adjust if necessary -->
+<!-- testData$symboling <- factor(testData$symboling, levels = levels(final_predictions$label)) -->
+
+<!-- # Calculate the confusion matrix -->
+<!-- rf_accuracy <- confusionMatrix(final_predictions$label, testData$symboling) -->
+
+<!-- # Print the accuracy results -->
+<!-- print(rf_accuracy) -->
+
+<!-- #88.89 -->
+
+<!-- ``` -->
+
+
+
+
+**7) knn model on lasso variables**
+```{r}
+
+
+# Ensure all factor variables in testData have the same levels as in trainData
+for(col in names(trainData)) {
+    if(is.factor(trainData[[col]])) {
+        testData[[col]] <- factor(testData[[col]], levels = levels(trainData[[col]]))
+    }
+}
+
+# Training control settings
+control <- trainControl(method = "cv", number = 10, savePredictions = "final")
+
+# Train the kNN model
+knn_model <- train(symboling ~ ., data = trainData, method = "knn", trControl = control, tuneLength = 10, preProcess = "scale")
+
+# Summarize the kNN model
+# print(knn_model)
+
+# Predict on test data
+knn_predictions <- predict(knn_model, testData)
+
+# Calculate accuracy using confusion matrix
+knn_accuracy <- confusionMatrix(knn_predictions, testData$symboling)
+print(knn_accuracy)
+
+
+```
+**Accuracy: 0.4722**
+
+**8) Neurel net on LASSO variables in python**
+
+**Extracting PCA components**
+```{r}
+library(kknn)
+
+# Assuming 'symboling' is a factor and part of the original 'data' dataset
+# Add the target variable 'symboling' to the PCA data
+pc_data <- data.frame(PC1 = pca_result$x[, "PC1"], PC2 = pca_result$x[, "PC2"])
+pc_data$symboling <- data$symboling
+# View(pc_data)
+head(pc_data)
+
+# write.csv(pc_data, "pc_data.csv", row.names = FALSE)
+
+
+# Split data into training and testing sets
+set.seed(123)  # For reproducibility
+train_indices <- sample(1:nrow(pc_data), size = 0.8 * nrow(pc_data))
+train_data <- pc_data[train_indices, ]
+test_data <- pc_data[-train_indices, ]
+
+
+
+```
+
+
+
+
+**9) Knn using PCA variables**
+```{r}
+# Train the KNN model
+knn_fit <- kknn(symboling ~ ., train_data, test_data, k = 5, distance = 1, kernel = "rectangular")
+
+# Predict using the KNN model
+predictions <- predict(knn_fit)
+
+# Evaluate the model accuracy
+accuracy <- sum(predictions == test_data$symboling) / nrow(test_data)
+print(paste("Accuracy:", accuracy))
+
+# Optionally, you can also view the confusion matrix to see performance details
+confusion_matrix <- table(Predicted = predictions, Actual = test_data$symboling)
+print(confusion_matrix)
+
+
+
+
+
+```
+**10) neural net on PCA is in python**
+
+
+**11) multinom on PCA **
+
+
+```{r}
+
+library(nnet)  # for multinom function
+
+# Train the multinomial logistic regression model
+multinom_fit <- multinom(symboling ~ ., data = train_data, trace = FALSE)  # trace = FALSE to turn off iteration output
+
+# Predict using the multinomial logistic regression model
+predictions <- predict(multinom_fit, newdata = test_data)
+
+# Evaluate the model accuracy
+accuracy <- sum(predictions == test_data$symboling) / nrow(test_data)
+print(paste("Accuracy:", accuracy))
+
+# View the confusion matrix
+confusion_matrix <- table(Predicted = predictions, Actual = test_data$symboling)
+print(confusion_matrix)
+
+
+```
+
+
+
+<!-- **12) RF on PCA** -->
+<!-- ```{r} -->
+
+
+<!-- head(data) -->
+
+<!-- control <- trainControl(method = "cv", number = 10, savePredictions = "final") -->
+<!-- rf_model <- train(symboling ~ ., data = train_data, method = "rf", num.trees = 100) -->
+<!-- print(rf_model) -->
+<!-- # Summarize the model -->
+<!-- accuracy_cv <- rf_model$results$Accuracy -->
+<!-- print(paste("Cross-validated Accuracy from training: ", accuracy_cv)) -->
+
+<!-- rf_predictions <- predict(rf_model, test_data,type = "prob") -->
+
+<!-- # Assuming 'rf_predictions' is your data frame or matrix of probabilities -->
+<!-- # This will find the column index with the highest probability in each row -->
+<!-- highest_prob_index <- max.col(rf_predictions, ties.method = "first") -->
+
+<!-- # Get the labels corresponding to the highest probability -->
+<!-- # Column names of 'rf_predictions' should match your class labels -->
+<!-- predicted_labels <- colnames(rf_predictions)[highest_prob_index] -->
+
+<!-- # Create a new data frame showing the prediction with the row names from 'rf_predictions' -->
+<!-- final_predictions$label <- factor(final_predictions$label, levels = unique(test_data$symboling)) -->
+<!-- library(caret) -->
+
+<!-- # Check if testData$symboling is a factor and adjust if necessary -->
+<!-- test_data$symboling <- factor(test_data$symboling, levels = levels(final_predictions$label)) -->
+
+<!-- # Calculate the confusion matrix -->
+<!-- rf_accuracy <- confusionMatrix(final_predictions$label, test_data$symboling) -->
+
+<!-- # Print the accuracy results -->
+<!-- print(rf_accuracy) -->
+
+<!-- ``` -->
+
+
