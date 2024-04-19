@@ -8,8 +8,7 @@ This project aims to enhance automobile insurance risk assessment by employing m
 - **Asad Harnekar** - *Initial work* - harneakara23@mytru.ca
 - **Seethalakshmy Parakkattu Mani** - *Initial work* - parakkattumanis22@mytru.ca
 
-## Methodology
-The methodology section encompasses:
+## Methodology:
 - **Variable Selection**: Using Principal Component Analysis (PCA) to address multicollinearity and select significant features.
 - **Model Building**: Employing LASSO for regularization and feature selection, and Random Forest for creating a robust predictive model.
 
