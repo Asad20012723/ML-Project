@@ -5,8 +5,8 @@
 This project aims to enhance automobile insurance risk assessment by employing machine learning models to predict symboling ratings, which denote insurance risk. Leveraging the Automobile dataset from the UCI Machine Learning Repository, we explore various methods including PCA, LASSO, and Random Forest to select and analyze variables, thereby reducing multicollinearity and improving model accuracy.
 
 ## Authors
-- **Asad Harnekar** - *Initial work* - harneakara23@mytru.ca
-- **Seethalakshmy Parakkattu Mani** - *Initial work* - parakkattumanis22@mytru.ca
+- **Asad Harnekar** - harneakara23@mytru.ca
+- **Seethalakshmy Parakkattu Mani** - parakkattumanis22@mytru.ca
 
 ## Methodology:
 - **Variable Selection**: Using Principal Component Analysis (PCA) to address multicollinearity and select significant features.
